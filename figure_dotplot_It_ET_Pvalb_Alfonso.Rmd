@@ -1,0 +1,140 @@
+---
+title: "Dotplot_Alfonso_Epilepsia"
+author: "DNO"
+date: "Update 2024-09-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(Seurat)
+library(scCustomize)
+library(RColorBrewer)
+library(tidyverse)
+```
+
+Mouse data:
+
+```{r}
+# orig <- readRDS("/media/draia-nicolauondina/LaCie/Ordi Rémi - RNAseq/DD/Sc RNA-Seq/Torch-clustering/mito10/GECortex_PostM/GECortex_PostMsub_celltypefinal.rds")
+```
+
+Human data: 
+
+```{r}
+
+```
+
+
+```{r}
+# E12_P30 <- subset(orig, age.at.collection %in% c("E12.5","E14.5","E16.5","P0","P2","P5","P8","P16","P30"))
+# Pvalb_IT_ET <- subset(E12_P30, family_label %in% c("Pvalb","IT","ET"))
+```
+
+```{r}
+# Idents(Pvalb_IT_ET) <- Pvalb_IT_ET$age.at.collection
+# Pvalb_IT_ET <- SetIdent(Pvalb_IT_ET, value = factor(Idents(Pvalb_IT_ET), levels = c("E12.5","E14.5","E16.5","P0","P2","P5","P8","P16","P30")))
+```
+
+```{r}
+num_colors <- length(unique(Pvalb_IT_ET$family_label))
+colors <- brewer.pal(n = num_colors, name = "Set1")  # Replace "Set1" with another palette name if needed
+
+DotPlot(
+  Pvalb_IT_ET, 
+  features = c("Akt1", "Akt3", "Depdc5", "Mios", "Mtor", "Pten", "Rheb", "Tsc1", "Tsc2", "Wdr59", "Braf"), 
+  split.by = "family_label", 
+  cols = colors
+) + coord_flip() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + labs(title = "Pvalb ET IT Gene Expression by timepoint")
+```
+
+```{r}
+Pvalb <- subset(Pvalb_IT_ET, family_label == "Pvalb")
+IT <- subset(Pvalb_IT_ET, family_label == "IT")
+ET <- subset(Pvalb_IT_ET, family_label == "ET")
+```
+
+
+```{r, fig.height=4, fig.width=15}
+a <- DotPlot_scCustom(Pvalb, features = c("Akt1", "Akt3", "Depdc5", "Mios", "Mtor", "Pten", "Rheb", "Tsc1", "Tsc2", "Wdr59", "Braf"), x_lab_rotate = T, flip_axes = T, scale.by = "size", col.min = -1, col.max = 1) + labs(title = "Pvalb Scaled") 
+b <- DotPlot_scCustom(ET, features = c("Akt1", "Akt3", "Depdc5", "Mios", "Mtor", "Pten", "Rheb", "Tsc1", "Tsc2", "Wdr59", "Braf"), x_lab_rotate = T, flip_axes = T, scale.by = "size", col.min = -1, col.max = 1) + labs(title = "ET Scaled") 
+c <- DotPlot_scCustom(IT, features = c("Akt1", "Akt3", "Depdc5", "Mios", "Mtor", "Pten", "Rheb", "Tsc1", "Tsc2", "Wdr59", "Braf"), x_lab_rotate = T, flip_axes = T, scale.by = "size", col.min = -1, col.max = 1) + labs(title = "IT Scaled")
+a + b + c
+```
+
+```{r,fig.height=4.5, fig.width=12.5}
+# Assuming you have a function to get the percentage expression data
+get_percent_expr_range <- function(seurat_object, features) {
+  data <- FetchData(seurat_object, vars = features)
+  percent_expr <- apply(data, 2, function(x) mean(x > 0) * 12)  # Example calculation
+  range(percent_expr)
+}
+
+# Compute the range for all datasets
+range_Pvalb <- get_percent_expr_range(Pvalb, c("Akt1", "Akt3", "Depdc5", "Mios", "Mtor", "Pten", "Rheb", "Tsc1", "Tsc2", "Wdr59", "Braf"))
+range_ET <- get_percent_expr_range(ET, c("Akt1", "Akt3", "Depdc5", "Mios", "Mtor", "Pten", "Rheb", "Tsc1", "Tsc2", "Wdr59", "Braf"))
+range_IT <- get_percent_expr_range(IT, c("Akt1", "Akt3", "Depdc5", "Mios", "Mtor", "Pten", "Rheb", "Tsc1", "Tsc2", "Wdr59", "Braf"))
+
+# Determine the global range
+global_range <- range(c(range_Pvalb, range_ET, range_IT))
+
+common_size_scale <- scale_size_continuous(range = global_range)
+
+library(scico)
+a <- DotPlot_scCustom(Pvalb, features = c("Akt1", "Akt3", "Depdc5", "Mios", "Mtor", "Pten", "Rheb", "Tsc1", "Tsc2", "Wdr59", "Braf"), 
+                      x_lab_rotate = T, flip_axes = T, scale.by = "size", col.min = -1, col.max = 1, colors_use = c("#00008b", "#1e90ff", "#cccccc", "#ffa500","#ff4500")) + 
+     labs(title = "Pvalb Scaled") + 
+     common_size_scale + NoLegend()
+
+b <- DotPlot_scCustom(ET, features = c("Akt1", "Akt3", "Depdc5", "Mios", "Mtor", "Pten", "Rheb", "Tsc1", "Tsc2", "Wdr59", "Braf"), 
+                      x_lab_rotate = T, flip_axes = T, scale.by = "size", col.min = -1, col.max = 1, colors_use = c("#00008b", "#1e90ff", "#cccccc", "#ffa500","#ff4500")) + 
+     labs(title = "ET Scaled") + 
+  scale_y_discrete(limits = c("E12.5","E14.5","E16.5","P0","P2","P5","P8","P16","P30")) +
+     common_size_scale + NoLegend() 
+
+c <- DotPlot_scCustom(IT, features = c("Akt1", "Akt3", "Depdc5", "Mios", "Mtor", "Pten", "Rheb", "Tsc1", "Tsc2", "Wdr59", "Braf"), 
+                      x_lab_rotate = T, flip_axes = T, scale.by = "size", col.min = -1, col.max = 1, colors_use = c("#00008b", "#1e90ff", "#cccccc", "#ffa500","#ff4500")) + 
+     labs(title = "IT Scaled") + 
+     common_size_scale
+
+# Combine plots
+library(patchwork)
+plot <- a + b + c
+# svg(filename="/home/draia-nicolauondina/Images/Pvalb_ET_IT_E12_P30.svg",
+#     width=12.5,
+#     height=4.5,
+#     pointsize=12, 
+#     onefile = F)
+#cette fonction le sauvegarde en svg où tout est groupé et donc impossible a degrouper ensuite
+plot
+# dev.off()
+
+# Sauvegarder en SVG
+ggsave("/home/draia-nicolauondina/Images/dotplot.svg", plot = plot, device = "svg", width = 12.5, height = 4.5)
+#utiliser cette fonction la en priorité
+
+plot
+
+```
+
+
+# No scaling:
+
+```{r, fig.height=4, fig.width=15}
+a <- DotPlot(Pvalb_m, features = c("Akt1", "Akt3", "Depdc5", "Mios", "Mtor", "Pten", "Rheb", "Tsc1", "Tsc2", "Wdr59", "Braf"),scale= F, cols = c("blue", "red")) + labs(title = "Pvalb") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + coord_flip()
+b <- DotPlot(ET_m, features = c("Akt1", "Akt3", "Depdc5", "Mios", "Mtor", "Pten", "Rheb", "Tsc1", "Tsc2", "Wdr59", "Braf"), scale =F, cols = c("blue", "red")) + labs(title = "ET") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + coord_flip()
+c <- DotPlot(IT_m, features = c("Akt1", "Akt3", "Depdc5", "Mios", "Mtor", "Pten", "Rheb", "Tsc1", "Tsc2", "Wdr59", "Braf"), scale =F, cols = c("blue", "red")) + labs(title = "IT", scale= F) + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + coord_flip()
+a + b + c
+```
+
+```{r}
+a <- VlnPlot(Pvalb_m, features = c("Akt1", "Akt3", "Depdc5", "Mios", "Mtor", "Pten", "Rheb", "Tsc1", "Tsc2", "Wdr59", "Braf"), stack = T, flip = T) + labs(title = "Pvalb Raw Gene Expression") + NoLegend() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) 
+b <- VlnPlot(ET_m, features = c("Akt1", "Akt3", "Depdc5", "Mios", "Mtor", "Pten", "Rheb", "Tsc1", "Tsc2", "Wdr59", "Braf"), stack = T, flip = T) + labs(title = "ET Raw Gene Expression") + NoLegend() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) 
+c <- VlnPlot(IT_m, features = c("Akt1", "Akt3", "Depdc5", "Mios", "Mtor", "Pten", "Rheb", "Tsc1", "Tsc2", "Wdr59", "Braf"), stack = T, flip = T) + labs(title = "IT Raw Gene Expression") + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) 
+a + b + c
+```
+
