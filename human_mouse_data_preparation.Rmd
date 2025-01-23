@@ -1,0 +1,528 @@
+---
+title: "Human Cortical Development - All Cells - Gene Activity Level Data analysis"
+author: "Draia-Nicolau Tangra Ondina"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: united
+    highlight: tango
+    code_folding: hide
+    fig_width: 15
+    fig_height: 10
+date: "2025-01-14"
+---
+```{css, echo=FALSE}
+# Your custom CSS styling
+# Adjust the max-height property as needed
+div.dataTable {
+  max-height: 300px;
+  overflow-y: auto;
+}
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.width = 8, fig.height = 6)
+```
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(biomaRt)
+library(AnnotationDbi)
+library(orthogene)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(babelgene)
+library(harmony)
+library(dittoSeq)
+library(scCustomize)
+```
+
+```{r}
+# human.data <- readRDS("/home/ondina/Documents/Article_Epilepsia/data_sn_RNAseq_human/dev_human.rds")
+# 
+# # Import a TSV file
+# metada_plus <- read.delim("/home/ondina/Documents/Article_Epilepsia/data_sn_RNAseq_human/meta.tsv", header = TRUE)
+# dim(human.data)
+```
+
+Metadata:
+```{r}
+head(human.data@meta.data)
+```
+
+Integrate new data inside:
+```{r}
+all.equal(rownames(human.data@meta.data), metada_plus$Cell_ID)  # should return TRUE
+human.data$Cell_ID <- rownames(human.data@meta.data)
+
+# Merge the extended metadata with the existing Seurat metadata
+new_metadata <- merge(human.data@meta.data, metada_plus, by = "Cell_ID", all.x = TRUE)
+
+# Ensure the rownames are set to Cell_ID
+rownames(new_metadata) <- new_metadata$Cell_ID
+
+# Update the metadata in the Seurat object
+human.data@meta.data <- new_metadata
+```
+
+
+Region broad:
+
+```{r}
+table(human_data$Region_Broad)
+```
+
+Keep only the prefrontal, cingulate, temporal and insula cortex
+
+```{r}
+human_main <- subset(human.data, Region_Broad %in% c("CC", "IC", "TC") | (Region_Broad == "FC" & region == "PFC"))
+# human_CC <- subset(human.data, Region_Broad == "CC")
+# human_FC <- subset(human.data, Region_Broad == "FC")
+# human_PFC <- subset(human_FC, region == "PFC")
+# rm(human_FC)
+# human_IC <- subset(human.data, Region_Broad == "IC")
+# human_TC <- subset(human.data, Region_Broad == "TC")
+rm(human.data)
+gc()
+# list_h <- list(CC = human_CC, PFC = human_PFC, IC = human_IC, TC = human_TC)
+```
+
+```{r}
+human_main <- NormalizeData(human_main)
+human_main <- FindVariableFeatures(human_main)
+human_main <- ScaleData(human_main)
+human_main <- RunPCA(human_main)
+human_main <- FindNeighbors(human_main)
+human_main <- FindClusters(human_main)
+human_main <- RunUMAP(human_main, dims = 1:20)
+```
+
+```{r}
+# rename FC as PFC as it's subsetted to be only the PFC
+human_main@meta.data$Region_Broad[human_main@meta.data$Region_Broad == "FC"] <- "PFC"
+
+DimPlot(human_main, reduction = "umap", group.by = "Region_Broad", label = T, repel = T) +  
+  ggtitle("Human data UMAP of PFC, CC, IC and TC regions",
+          subtitle = paste(dim(human_main)[1], "cells"))
+```
+
+
+# Merge with mouse data
+```{r}
+# orig <- readRDS("/media/ondina/LaCie/Ordi Rémi - RNAseq/DD/Sc RNA-Seq/Torch-clustering/mito10/GECortex_PostM/GECortex_PostMsub_celltypefinal.rds")
+# E12_P30 <- subset(orig, age.at.collection %in% c("E12.5","E14.5","E16.5","P0","P2","P5","P8","P16","P30"))
+```
+
+```{r}
+# saved
+# saveRDS(human_main,"/home/ondina/Documents/Article_Epilepsia/data_sn_RNAseq_human/human_dev_PFC_IC_TC_CC.Rds")
+#human_main <- readRDS("/home/ondina/Documents/Article_Epilepsia/data_sn_RNAseq_human/human_dev_PFC_IC_TC_CC.Rds")
+human_main <- readRDS("/home/ondina/Documents/Article_Epilepsia/humain_main_subset_valid_genes.Rds")
+# saveRDS(E12_P30, "/home/ondina/Documents/Article_Epilepsia/mouse_E12_E30.Rds")
+# mouse_main <- readRDS("/home/ondina/Documents/Article_Epilepsia/mouse_E12_E30.Rds")
+mouse_main <- readRDS("/home/ondina/Documents/Article_Epilepsia/mouse_E12_E30_renorm.Rds")
+```
+
+# Merge both data, harmonize genes
+```{r}
+# mouse_main <- NormalizeData(mouse_main)
+# mouse_main <- FindVariableFeatures(mouse_main)
+# mouse_main <- ScaleData(mouse_main)
+# mouse_main <- RunPCA(mouse_main)
+# mouse_main <- FindNeighbors(mouse_main)
+# mouse_main <- FindClusters(mouse_main)
+# mouse_main <- RunUMAP(mouse_main, dims = 1:20)
+# saveRDS(mouse_main, "/home/ondina/Documents/Article_Epilepsia/mouse_E12_E30_renorm.Rds")
+```
+
+First, convert Ensembl ID to Gene Symbol in seurat data of human:
+
+## For the count matrix:
+```{r}
+#methode de delphine
+human_genes <- rownames(human_main@assays$RNA)
+
+human_gene_symbol <- bitr(human_genes, fromType = "ENSEMBL", toType = "SYMBOL", OrgDb = org.Hs.eg.db)
+
+#check number of NA
+
+na_count <- sum(is.na(human_gene_symbol$SYMBOL))
+print(na_count)
+
+#0, finally
+
+#rename in seurat assays the genes according to the results
+
+# convert to orthologues genes and insert them in human_gene_symbol table
+
+
+#éethode suggeree par Lionel:
+
+human_genes <- human_gene_symbol$SYMBOL
+
+convertHumanGeneList <- function(human_genes){
+
+  mouse_genes = babelgene::orthologs( genes = human_genes, human = TRUE, species = "mouse")
+
+  return( mouse_genes)
+}
+
+
+human_ortho <- convertHumanGeneList(human_genes)
+colnames(human_ortho)[colnames(human_ortho) == "human_ensembl"] <- "ENSEMBL"
+human_ortho_all <- merge(human_ortho, human_gene_symbol, by = "ENSEMBL", all.x = TRUE)
+human_gene_symbol <- human_ortho_all
+
+```
+
+```{r}
+# Remove all rows with duplicated "ID"
+human_gene_symbol_no_dup <- human_gene_symbol[!(human_gene_symbol$symbol %in% human_gene_symbol$symbol[duplicated(human_gene_symbol$symbol)]), ]
+print(length(human_gene_symbol_no_dup$symbol))
+human_gene_symbol <- human_gene_symbol_no_dup
+
+# human_main <- subset(human_main, features = human_gene_symbol$ENSEMBL)
+# human_main <- ScaleData(human_main)
+# human_main <- NormalizeData(human_main)
+
+#saveRDS(human_main, "/home/ondina/Documents/Article_Epilepsia/humain_main_subset_valid_genes.Rds")
+```
+
+
+```{r}
+# Extract ENSEMBL IDs from the row names of your Seurat object
+Gene_ID <- rownames(human_main@assays[["RNA"]]@counts)
+
+# Replace NA values in SYMBOL with the original ENSEMBL IDs
+#human_gene_symbol[is.na(human_gene_symbol$symbol)] <- human_gene_symbol$ENSEMBL
+
+# Extract current ENSEMBL IDs from the Seurat object
+current_ensembl <- rownames(human_main@assays[["RNA"]]@counts)
+
+# Match ENSEMBL IDs in the Seurat object to the SYMBOLs in human_gene_symbol
+matched_symbols <- human_gene_symbol$symbol[match(current_ensembl, human_gene_symbol$ENSEMBL)]
+
+# Replace NA values (if any mismatch occurred) with original ENSEMBL IDs
+#matched_symbols[is.na(matched_symbols)] <- current_ensembl
+
+# Update row names in the Seurat object
+rownames(human_main@assays[["RNA"]]@counts) <- matched_symbols
+
+# Check for duplicates
+sum(duplicated(rownames(human_main@assays[["RNA"]]@counts)))
+
+# Check for NA values
+sum(is.na(rownames(human_main@assays[["RNA"]]@counts)))
+
+```
+For data:
+
+```{r}
+# Extract ENSEMBL IDs from the row names of your Seurat object
+Gene_ID <- rownames(human_main@assays[["RNA"]]@data)
+
+# Replace NA values in SYMBOL with the original ENSEMBL IDs
+#human_gene_symbol$SYMBOL[is.na(human_gene_symbol$symbol)] <- human_gene_symbol$ENSEMBL
+
+# Extract current ENSEMBL IDs from the Seurat object
+current_ensembl <- rownames(human_main@assays[["RNA"]]@data)
+
+# Match ENSEMBL IDs in the Seurat object to the SYMBOLs in human_gene_symbol
+matched_symbols <- human_gene_symbol$symbol[match(current_ensembl, human_gene_symbol$ENSEMBL)]
+
+# Replace NA values (if any mismatch occurred) with original ENSEMBL IDs
+#matched_symbols[is.na(matched_symbols)] <- current_ensembl
+
+# Update row names in the Seurat object
+rownames(human_main@assays[["RNA"]]@data) <- matched_symbols
+
+# Check for duplicates
+sum(duplicated(rownames(human_main@assays[["RNA"]]@data)))
+
+# Check for NA values
+sum(is.na(rownames(human_main@assays[["RNA"]]@data)))
+
+```
+
+```{r}
+# Extract ENSEMBL IDs from the row names of your Seurat object
+Gene_ID <- rownames(human_main@assays[["RNA"]]@data)
+
+# Replace NA values in SYMBOL with the original ENSEMBL IDs
+#human_gene_symbol$SYMBOL[is.na(human_gene_symbol$symbol)] <- human_gene_symbol$ENSEMBL
+
+# Extract current ENSEMBL IDs from the Seurat object
+current_ensembl <- rownames(human_main@assays[["RNA"]]@data)
+
+# Match ENSEMBL IDs in the Seurat object to the SYMBOLs in human_gene_symbol
+matched_symbols <- human_gene_symbol$symbol[match(current_ensembl, human_gene_symbol$ENSEMBL)]
+
+# Replace NA values (if any mismatch occurred) with original ENSEMBL IDs
+#matched_symbols[is.na(matched_symbols)] <- current_ensembl
+
+# Update row names in the Seurat object
+rownames(human_main@assays[["RNA"]]@data) <- matched_symbols
+
+# Check for duplicates
+sum(duplicated(rownames(human_main@assays[["RNA"]]@data)))
+
+# Check for NA values
+sum(is.na(rownames(human_main@assays[["RNA"]]@data)))
+
+```
+
+```{r}
+# Extract ENSEMBL IDs from the row names of your Seurat object
+Gene_ID <- rownames(human_main@assays[["RNA"]]@scale.data)
+
+# Replace NA values in SYMBOL with the original ENSEMBL IDs
+#human_gene_symbol$SYMBOL[is.na(human_gene_symbol$symbol)] <- human_gene_symbol$ENSEMBL
+
+# Extract current ENSEMBL IDs from the Seurat object
+current_ensembl <- rownames(human_main@assays[["RNA"]]@scale.data)
+
+# Match ENSEMBL IDs in the Seurat object to the SYMBOLs in human_gene_symbol
+matched_symbols <- human_gene_symbol$symbol[match(current_ensembl, human_gene_symbol$ENSEMBL)]
+
+# Replace NA values (if any mismatch occurred) with original ENSEMBL IDs
+#matched_symbols[is.na(matched_symbols)] <- current_ensembl
+
+# Update row names in the Seurat object
+rownames(human_main@assays[["RNA"]]@scale.data) <- matched_symbols
+
+# Check for duplicates
+sum(duplicated(rownames(human_main@assays[["RNA"]]@scale.data)))
+
+# Check for NA values
+sum(is.na(rownames(human_main@assays[["RNA"]]@scale.data)))
+
+```
+
+```{r}
+# Extract ENSEMBL IDs from the row names of your Seurat object
+Gene_ID <- rownames(human_main@assays[["RNA"]]@var.features)
+
+# Replace NA values in SYMBOL with the original ENSEMBL IDs
+#human_gene_symbol$SYMBOL[is.na(human_gene_symbol$symbol)] <- human_gene_symbol$ENSEMBL
+
+# Extract current ENSEMBL IDs from the Seurat object
+current_ensembl <- human_main@assays[["RNA"]]@var.features
+
+# Match ENSEMBL IDs in the Seurat object to the SYMBOLs in human_gene_symbol
+matched_symbols <- human_gene_symbol$symbol[match(current_ensembl, human_gene_symbol$ENSEMBL)]
+
+# Replace NA values (if any mismatch occurred) with original ENSEMBL IDs
+#matched_symbols[is.na(matched_symbols)] <- current_ensembl
+
+# Update row names in the Seurat object
+human_main@assays[["RNA"]]@var.features <- matched_symbols
+
+# Check for duplicates
+sum(duplicated(human_main@assays[["RNA"]]@var.features))
+
+```
+
+```{r}
+# Check for duplicates in counts
+# duplicate_genes <- rownames(human_main@assays[["RNA"]]@counts)[duplicated(rownames(human_main@assays[["RNA"]]@counts))]
+# 
+# if (length(duplicate_genes) > 0) {
+#   print(paste("Duplicates found:", paste(duplicate_genes, collapse = ", ")))
+# }
+
+```
+
+Re-arrange the seurat object:
+```{r}
+dim(human_main@assays$RNA@data)        # Check dimensions of the normalized data
+dim(human_main@assays$RNA@counts)      # Check dimensions of the raw counts
+dim(human_main@assays$RNA@meta.features) # Check dimensions of meta.features
+
+```
+
+```{r}
+genes_in_data <- rownames(human_main@assays$RNA@data)
+human_main@assays$RNA@meta.features <- human_main@assays$RNA@meta.features[genes_in_data, , drop = FALSE]
+
+# Extract feature names from the data slot
+features <- rownames(human_main@assays$RNA@data)
+
+# Create a new meta.features data frame
+meta.features <- data.frame(
+  feature_name = features,
+  feature_is_filtered = FALSE,       # Example column
+  feature_reference = NA,            # Placeholder values
+  feature_biotype = NA,              # Placeholder values
+  feature_length = NA,               # Placeholder values
+  feature_type = NA,                 # Placeholder values
+  vst.mean = NA,                     # Placeholder values
+  vst.variance = NA,                 # Placeholder values
+  vst.variance.expected = NA,        # Placeholder values
+  vst.variance.standardized = NA,    # Placeholder values
+  vst.variable = NA,                 # Placeholder values
+  row.names = features
+)
+
+# Assign the new meta.features back to the Seurat object
+human_main@assays$RNA@meta.features <- meta.features
+
+
+# Check row names of data and meta.features
+rownames_data <- rownames(human_main@assays$RNA@data)
+rownames_meta <- rownames(human_main@assays$RNA@meta.features)
+
+# Identify mismatched rows
+mismatched_features <- setdiff(rownames_data, rownames_meta)
+print(mismatched_features)
+
+
+validObject(human_main, complete = T)
+```
+
+```{r}
+human_main <- ScaleData(human_main)
+human_main <- NormalizeData(human_main)
+human_main <- RunPCA(human_main)
+human_main <- FindNeighbors(human_main)
+human_main <- FindClusters(human_main)
+human_main <- RunUMAP(human_main, dims = 1:20)
+#saveRDS(human_main, "/home/ondina/Documents/Article_Epilepsia/humain_main_ortho_mouse.Rds")
+human_main <- readRDS("/home/ondina/Documents/Article_Epilepsia/humain_main_ortho_mouse.Rds")
+
+# Define a function to classify and filter ages
+filter_ages <- function(age_column) {
+  sapply(age_column, function(age) {
+    if (grepl("^GW", age)) {
+      # Extract gestational week number (e.g., "GW23" -> 23)
+      gw_number <- as.numeric(gsub("[^0-9.]", "", age))
+      return(gw_number >= 23) # Keep GW23 or later
+    } else if (grepl("year|day", age)) {
+      # Convert postnatal age to years (e.g., "3 years" -> 3, "332 days" -> 0.91)
+      if (grepl("year", age)) {
+        years <- as.numeric(gsub(" .*", "", age))
+        return(years <= 12) # Keep up to 12 years
+      } else if (grepl("days", age)) {
+        days <- as.numeric(gsub("[^0-9]", "", age))
+        return(days <= (12 * 365)) # Convert 12 years to days
+      }
+    }
+    return(FALSE) # Exclude all other cases
+  })
+}
+
+# Apply the filter to the metadata
+valid_cells <- filter_ages(human_main$Age)
+
+# Subset the Seurat object
+human_main_filtered <- subset(human_main, cells = names(valid_cells)[valid_cells])
+
+
+```
+
+Combine both datasets
+
+```{r}
+human_mouse.combined <- merge(mouse_main, y = human_main_filtered, add.cell.ids = c("mouse", "human"), project = "Alfonso_Human_Mouse_Comparison")
+human_mouse.combined
+
+#saveRDS(human_mouse.combined , "/home/ondina/Documents/Article_Epilepsia/humain_combined_main_ortho_mouse_sct.Rds") # already normalized
+human_mouse.combined <- readRDS("/home/ondina/Documents/Article_Epilepsia/humain_combined_main_ortho_mouse_sct.Rds")  # already normalized
+```
+
+
+```{r}
+
+#human_mouse.combined <- NormalizeData(human_mouse.combined)
+#human_mouse.combined <- ScaleData(human_mouse.combined)
+# store mitochondrial percentage in object meta data
+#human_mouse.combined <- PercentageFeatureSet(human_mouse.combined, pattern = "^MT-", col.name = "percent.mt")
+# run sctransform
+#human_mouse.combined <- SCTransform(human_mouse.combined, vars.to.regress = "percent.mt", verbose = FALSE)
+# Run PCA
+
+human_mouse.combined <- RunPCA(human_mouse.combined)
+
+# Run UMAP
+meta_data <- human_mouse.combined@meta.data
+
+# Add a new column based on the rownames
+meta_data$organism <- ifelse(grepl("^mouse_", rownames(meta_data)), "mouse", "human")
+
+# Update the metadata in the Seurat object
+human_mouse.combined@meta.data <- meta_data
+
+human_mouse.combined <- RunHarmony(human_mouse.combined, "organism")
+human_mouse.combined <- RunUMAP(human_mouse.combined, reduction = "harmony", dims = 1:30)
+
+# Clustering
+# human_mouse.combined <- FindNeighbors(human_mouse.combined, dims = 1:30)
+# human_mouse.combined <- FindClusters(human_mouse.combined)
+
+#saveRDS(human_mouse.combined , "/home/ondina/Documents/Article_Epilepsia/humain_combined_main_ortho_mouse_sct_dimred.Rds")
+```
+
+```{r}
+# rename FC as PFC as it's subsetted to be only the PFC
+# DimPlot(human_mouse.combined, reduction = "umap", group.by = "organism", label = T, repel = T) +  
+#   ggtitle("Human and mouse data UMAP GW23-12yrs/E12.5 - P30",
+#           subtitle = paste(dim(human_mouse.combined)[1], "cells"))
+dittoDimPlot(human_mouse.combined, "organism")
+```
+
+```{r}
+dittoDimPlot(human_mouse.combined, "Lineage")
+```
+
+```{r}
+dittoDimPlot(human_mouse.combined, "family_label")
+```
+
+
+
+```{r}
+dittoDimPlot(human_mouse.combined, "Age")
+```
+
+```{r}
+#levels(human_mouse.combined$age.at.collection) <- c(levels(human_mouse.combined$age.at.collection), c("E12.5","E14.5","E16.5","P0","P2","P5","P8","P16","P30"))
+Pvalb <- subset(human_mouse.combined, family_label == "Pvalb")
+# Convert to factor if needed
+Pvalb$age.at.collection <- as.factor(Pvalb$age.at.collection)
+levels(Pvalb$age.at.collection) <- c(levels(Pvalb$age.at.collection), c("E12.5","E14.5","E16.5","P0","P2","P5","P8","P16","P30"))
+ET <- subset(human_mouse.combined, family_label == "ET")
+IT <- subset(human_mouse.combined, family_label == "IT")
+```
+
+
+```{r, fig.height=5, fig.width=4}
+# Assuming you have a function to get the percentage expression data
+get_percent_expr_range <- function(seurat_object, features) {
+  data <- FetchData(seurat_object, vars = features)
+  percent_expr <- apply(data, 2, function(x) mean(x > 0) * 12)  # Example calculation
+  range(percent_expr)
+}
+
+range_Pvalb <- get_percent_expr_range(Pvalb, c("Akt1", "Akt3", "Depdc5", "Mios", "Mtor", "Pten", "Rheb", "Tsc1", "Tsc2", "Wdr59", "Braf"))
+range_ET <- get_percent_expr_range(ET, c("Akt1", "Akt3", "Depdc5", "Mios", "Mtor", "Pten", "Rheb", "Tsc1", "Tsc2", "Wdr59", "Braf"))
+range_IT <- get_percent_expr_range(IT, c("Akt1", "Akt3", "Depdc5", "Mios", "Mtor", "Pten", "Rheb", "Tsc1", "Tsc2", "Wdr59", "Braf"))
+
+# Determine the global range
+global_range <- range(c(range_Pvalb, range_ET, range_IT))
+
+common_size_scale <- scale_size_continuous(range = global_range)
+
+library(scico)
+a <- DotPlot_scCustom(Pvalb, features = c("Akt1", "Akt3", "Depdc5", "Mios", "Mtor", "Pten", "Rheb", "Tsc1", "Tsc2", "Wdr59", "Braf"), 
+                      x_lab_rotate = T, flip_axes = T, scale.by = "size", col.min = -1, col.max = 1, group.by = "age.at.collection", colors_use = c("#00008b", "#1e90ff", "#cccccc", "#ffa500","#ff4500")) + 
+     labs(title = "Pvalb Scaled") + 
+     common_size_scale + NoLegend()
+a
+```
+
+
+```{r}
+sessionInfo()
+```
+
